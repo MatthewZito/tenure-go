@@ -108,6 +108,9 @@ func (lc *LRUCache) Del(key interface{}) (wasDeleted bool) {
 }
 
 func (lc *LRUCache) Keys() []interface{} {
+	lc.lock.RLock()
+
+	defer lc.lock.RUnlock()
 	keys := make([]interface{}, len(lc.cache))
 
 	i := 0
@@ -120,6 +123,9 @@ func (lc *LRUCache) Keys() []interface{} {
 }
 
 func (lc *LRUCache) Peek(key interface{}) (value interface{}) {
+	lc.lock.RLock()
+
+	defer lc.lock.RUnlock()
 	if v, ok := lc.cache[key]; ok {
 		return v.Value.(*pair).value
 	}
@@ -128,11 +134,17 @@ func (lc *LRUCache) Peek(key interface{}) (value interface{}) {
 }
 
 func (lc *LRUCache) Has(key interface{}) (ok bool) {
+	lc.lock.RLock()
+
+	defer lc.lock.RUnlock()
 	_, ok = lc.cache[key]
 	return ok
 }
 
 func (lc *LRUCache) Purge() {
+	lc.lock.Lock()
+
+	defer lc.lock.Unlock()
 	for _, v := range lc.cache {
 		if lc.onItemEvicted != nil {
 			lc.PurgeLRUItem(v)
@@ -144,10 +156,16 @@ func (lc *LRUCache) Purge() {
 }
 
 func (lc *LRUCache) Size() int {
+	lc.lock.Lock()
+
+	defer lc.lock.Unlock()
 	return lc.links.Len()
 }
 
 func (lc *LRUCache) AdjustCapacity(bufCap int) (numEvicted int) {
+	lc.lock.RLock()
+
+	defer lc.lock.RUnlock()
 	diff := lc.links.Len() - bufCap
 
 	if diff < 0 {
