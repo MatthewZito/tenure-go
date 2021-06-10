@@ -1,9 +1,8 @@
-package main
+package tenure
 
 import (
 	"container/list"
 	"errors"
-	"fmt"
 	"sync"
 )
 
@@ -50,8 +49,8 @@ func New(bufCap int, onItemEvicted Callback) (*LRUCache, error) {
 
 func (lc *LRUCache) Get(key interface{}) (value interface{}, ok bool) {
 	lc.lock.Lock()
-
 	defer lc.lock.Unlock()
+
 	if kv, ok := lc.cache[key]; ok {
 		lc.links.MoveToFront(kv)
 
@@ -67,25 +66,25 @@ func (lc *LRUCache) Get(key interface{}) (value interface{}, ok bool) {
 
 func (lc *LRUCache) Put(key, value interface{}) (wasEvicted bool) {
 	lc.lock.Lock()
-
 	defer lc.lock.Unlock()
+
 	if kv, ok := lc.cache[key]; ok {
 		lc.links.MoveToFront(kv)
 
 		kv.Value.(*pair).value = value
 
 		return false
-	} else {
-		kv := &pair{key, value}
-
-		k := lc.links.PushFront(kv)
-		lc.cache[key] = k
 	}
+
+	kv := &pair{key, value}
+
+	k := lc.links.PushFront(kv)
+	lc.cache[key] = k
 
 	if lc.links.Len() > lc.capacity {
 		if kv := lc.links.Back(); kv != nil {
-			lc.PurgeLRUItem(kv)
-			lc.TryEvict(kv)
+			lc.purgeLRUItem(kv)
+			lc.tryEvict(kv)
 
 			return true
 		}
@@ -96,10 +95,10 @@ func (lc *LRUCache) Put(key, value interface{}) (wasEvicted bool) {
 
 func (lc *LRUCache) Del(key interface{}) (wasDeleted bool) {
 	lc.lock.Lock()
-
 	defer lc.lock.Unlock()
+
 	if kv, ok := lc.cache[key]; ok {
-		lc.PurgeLRUItem(kv)
+		lc.purgeLRUItem(kv)
 
 		return true
 	}
@@ -109,13 +108,12 @@ func (lc *LRUCache) Del(key interface{}) (wasDeleted bool) {
 
 func (lc *LRUCache) Keys() []interface{} {
 	lc.lock.RLock()
-
 	defer lc.lock.RUnlock()
-	keys := make([]interface{}, len(lc.cache))
 
-	i := 0
-	for k, _ := range lc.cache {
-		keys[i] = k
+	keys := make([]interface{}, lc.links.Len())
+
+	for i, k := 0, lc.links.Back(); k != nil; k = k.Prev() {
+		keys[i] = k.Value.(*pair).key
 		i++
 	}
 
@@ -124,31 +122,31 @@ func (lc *LRUCache) Keys() []interface{} {
 
 func (lc *LRUCache) Peek(key interface{}) (value interface{}) {
 	lc.lock.RLock()
-
 	defer lc.lock.RUnlock()
-	if v, ok := lc.cache[key]; ok {
-		return v.Value.(*pair).value
+
+	if kv, ok := lc.cache[key]; ok {
+		return kv.Value.(*pair).value
 	}
 
 	return nil
 }
 
 func (lc *LRUCache) Has(key interface{}) (ok bool) {
-	lc.lock.RLock()
+	lc.lock.Lock()
+	defer lc.lock.Unlock()
 
-	defer lc.lock.RUnlock()
 	_, ok = lc.cache[key]
-	return ok
+	return
 }
 
 func (lc *LRUCache) Purge() {
 	lc.lock.Lock()
-
 	defer lc.lock.Unlock()
+
 	for _, v := range lc.cache {
 		if lc.onItemEvicted != nil {
-			lc.PurgeLRUItem(v)
-			lc.TryEvict(v)
+			lc.purgeLRUItem(v)
+			lc.tryEvict(v)
 		}
 	}
 
@@ -156,16 +154,23 @@ func (lc *LRUCache) Purge() {
 }
 
 func (lc *LRUCache) Size() int {
-	lc.lock.Lock()
+	lc.lock.RLock()
+	defer lc.lock.RUnlock()
 
-	defer lc.lock.Unlock()
 	return lc.links.Len()
+}
+
+func (lc *LRUCache) Capacity() int {
+	lc.lock.RLock()
+	defer lc.lock.RUnlock()
+
+	return lc.capacity
 }
 
 func (lc *LRUCache) AdjustCapacity(bufCap int) (numEvicted int) {
 	lc.lock.RLock()
-
 	defer lc.lock.RUnlock()
+
 	diff := lc.links.Len() - bufCap
 
 	if diff < 0 {
@@ -174,66 +179,36 @@ func (lc *LRUCache) AdjustCapacity(bufCap int) (numEvicted int) {
 
 	for i := 0; i < diff; i++ {
 		if kv := lc.links.Back(); kv != nil {
-			lc.PurgeLRUItem(kv)
-			lc.TryEvict(kv)
+			lc.purgeLRUItem(kv)
+			lc.tryEvict(kv)
 		}
 	}
 
 	lc.capacity = bufCap
+
 	return diff
+}
+func (lc *LRUCache) LeastRecentlyUsed() (key interface{}, value interface{}) {
+	kv := lc.links.Back()
+	if kv != nil {
+		n := kv.Value.(*pair)
+		key, value = n.key, n.value
+		return
+	}
+	return
 }
 
 /* Utilities */
 
-func (lc *LRUCache) PurgeLRUItem(e *list.Element) {
+func (lc *LRUCache) purgeLRUItem(e *list.Element) {
 	lc.links.Remove(e)
-	k := e.Value.(*pair)
-	delete(lc.cache, k.key)
+	kv := e.Value.(*pair)
+	delete(lc.cache, kv.key)
 }
 
-func (lc *LRUCache) TryEvict(e *list.Element) {
+func (lc *LRUCache) tryEvict(e *list.Element) {
 	if lc.onItemEvicted != nil {
 		kv := e.Value.(*pair)
 		lc.onItemEvicted(kv.key, kv.value)
 	}
-}
-
-func main() {
-	lru, ok := New(3, cb)
-	if ok != nil {
-		fmt.Println("error")
-	}
-	// | 1 |
-	if ok := lru.Put(1, 1); ok {
-		fmt.Println("Evicted!", 1)
-	}
-
-	// | 2 | 1 |
-	if ok := lru.Put(2, 2); ok {
-		fmt.Println("Evicted!", 2)
-	}
-
-	// | 3 | 2 | 1 |
-	if ok := lru.Put(3, 3); ok {
-		fmt.Println("Evicted!", 3)
-	}
-
-	// | 1 | 3 | 2 |
-	v, got := lru.Get(1)
-
-	if got {
-		fmt.Println("Get", v)
-	}
-
-	// | 4 | 1 | 3 | 2 |
-	if ok := lru.Put(4, 4); ok {
-		fmt.Println("Evicted!", 4)
-	}
-
-	fmt.Println(lru.Keys())
-}
-
-func cb(key interface{}, value interface{}) {
-	fmt.Println("key is", key)
-	fmt.Println("value is", value)
 }
