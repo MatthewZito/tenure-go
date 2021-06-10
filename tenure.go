@@ -33,6 +33,10 @@ type pair struct {
 	value interface{}
 }
 
+// New initializes a new LRU cache with a buffer capacity of `bufCap`
+// It accepts as a second parameter a callback to be invoked upon successful invocation
+// of the Least Recently-Used cache policy i.e. when a key/value pair is removed
+// All transactions utilize locks and are therefore thread-safe
 func New(bufCap int, onItemEvicted Callback) (*LRUCache, error) {
 	if bufCap <= 0 {
 		return nil, errors.New("an LRU Cache must be initialized with a whole number greater than zero")
@@ -47,6 +51,9 @@ func New(bufCap int, onItemEvicted Callback) (*LRUCache, error) {
 	return c, nil
 }
 
+// Get attempts to retrieve the value for the given key from the cache
+// Returns the corresponding value and true if extant; else, returns nil, false
+// Get transactions will move the item to the head of the cache, designating it as most recently-used
 func (lc *LRUCache) Get(key interface{}) (value interface{}, ok bool) {
 	lc.lock.Lock()
 	defer lc.lock.Unlock()
@@ -64,6 +71,11 @@ func (lc *LRUCache) Get(key interface{}) (value interface{}, ok bool) {
 	return nil, false
 }
 
+// Put adds or inserts a given key / value pair into the cache
+// Put transactions will move the key to the head of the cache, designating it as 'most recently-used'
+// If the cache has reached the specified capacity, Put transactions will also enact the eviction policy
+// thereby removing the least recently-used item
+// Returns a boolean flag indicating whether an eviction occurred
 func (lc *LRUCache) Put(key, value interface{}) (wasEvicted bool) {
 	lc.lock.Lock()
 	defer lc.lock.Unlock()
@@ -93,6 +105,8 @@ func (lc *LRUCache) Put(key, value interface{}) (wasEvicted bool) {
 	return false
 }
 
+// Del deletes an item corresponding to a given key from the cache, if extant
+// A boolean flag is returned, indicating whether of not the transaction occurred
 func (lc *LRUCache) Del(key interface{}) (wasDeleted bool) {
 	lc.lock.Lock()
 	defer lc.lock.Unlock()
@@ -106,6 +120,7 @@ func (lc *LRUCache) Del(key interface{}) (wasDeleted bool) {
 	return false
 }
 
+// Keys returns a slice of the keys currently extant in the cache
 func (lc *LRUCache) Keys() []interface{} {
 	lc.lock.RLock()
 	defer lc.lock.RUnlock()
@@ -120,17 +135,8 @@ func (lc *LRUCache) Keys() []interface{} {
 	return keys
 }
 
-func (lc *LRUCache) Peek(key interface{}) (value interface{}) {
-	lc.lock.RLock()
-	defer lc.lock.RUnlock()
-
-	if kv, ok := lc.cache[key]; ok {
-		return kv.Value.(*pair).value
-	}
-
-	return nil
-}
-
+// Has returns a boolean flag verifying the existence (or lack thereof)
+// of a given key in the cache without enacting the eviction policy
 func (lc *LRUCache) Has(key interface{}) (ok bool) {
 	lc.lock.Lock()
 	defer lc.lock.Unlock()
@@ -139,7 +145,8 @@ func (lc *LRUCache) Has(key interface{}) (ok bool) {
 	return
 }
 
-func (lc *LRUCache) Purge() {
+// Drop drops all items from the cache
+func (lc *LRUCache) Drop() {
 	lc.lock.Lock()
 	defer lc.lock.Unlock()
 
@@ -153,6 +160,7 @@ func (lc *LRUCache) Purge() {
 	lc.links.Init()
 }
 
+// Size returns the current size of the cache
 func (lc *LRUCache) Size() int {
 	lc.lock.RLock()
 	defer lc.lock.RUnlock()
@@ -160,6 +168,7 @@ func (lc *LRUCache) Size() int {
 	return lc.links.Len()
 }
 
+// Capacity returns the current maximum buffer capacity of the cache
 func (lc *LRUCache) Capacity() int {
 	lc.lock.RLock()
 	defer lc.lock.RUnlock()
@@ -167,6 +176,9 @@ func (lc *LRUCache) Capacity() int {
 	return lc.capacity
 }
 
+// AdjustCapacity resizes the cache capacity
+// Invoking this transaction will evict all least recently-used items
+// to adjust the cache, where necessary
 func (lc *LRUCache) AdjustCapacity(bufCap int) (numEvicted int) {
 	lc.lock.RLock()
 	defer lc.lock.RUnlock()
@@ -188,6 +200,8 @@ func (lc *LRUCache) AdjustCapacity(bufCap int) (numEvicted int) {
 
 	return diff
 }
+
+// LeastRecentlyUsed returns the least recently-used key / value pair, or nil if not extant
 func (lc *LRUCache) LeastRecentlyUsed() (key interface{}, value interface{}) {
 	kv := lc.links.Back()
 	if kv != nil {

@@ -141,18 +141,18 @@ func TestLeastRecentlyUsed(t *testing.T) {
 	}
 
 	evictions = 0
-	lru.Purge()
+	lru.Drop()
 
 	if evictions != maxcap {
-		t.Fatalf("Expected purge to remove all cached values; Have %v evictions, Want %v evictions", evictions, maxcap)
+		t.Fatalf("Expected drop to remove all cached values; Have %v evictions, Want %v evictions", evictions, maxcap)
 	}
 
 	if len(lru.Keys()) != 0 {
-		t.Fatalf("Expected purge to remove all keys; Have %v keys, Want %v keys", len(lru.Keys()), 0)
+		t.Fatalf("Expected drop to remove all keys; Have %v keys, Want %v keys", len(lru.Keys()), 0)
 	}
 }
 
-func HasAndPeekInconsequential(t *testing.T) {
+func TestHasIsInconsequential(t *testing.T) {
 	maxcap := 9
 	evictions := 0
 
@@ -166,14 +166,6 @@ func HasAndPeekInconsequential(t *testing.T) {
 	lru, err := New(maxcap, incr)
 	if err != nil {
 		t.Fatalf("Failed to initialize a new LRU cache instance; see %v", err)
-	}
-
-	for i := 0; i < maxcap; i++ {
-		lru.Put(i, i)
-		lru.Peek(i)
-	}
-	if evictions != 0 {
-		t.Fatalf("Peek should not trigger the eviction policy; Have %v evictions, Want %v evictions", evictions, 0)
 	}
 
 	for i := maxcap + 1; i < maxcap*2; i++ {
@@ -243,10 +235,6 @@ func TestMitigations(t *testing.T) {
 
 	if lru.Del(9) {
 		t.Fatal("Deleting a non-extant value should return false")
-	}
-
-	if v := lru.Peek(9); v != nil {
-		t.Fatal("Peek used with a non-extant key should return nil")
 	}
 
 	if lru.Has(9) {
